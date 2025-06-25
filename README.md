@@ -1,0 +1,2 @@
+# Mini Inventory Management System
+
