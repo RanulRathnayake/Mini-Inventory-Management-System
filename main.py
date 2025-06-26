@@ -1,8 +1,8 @@
 from fastapi import FastAPI, HTTPException
-from models import Product
-from models import PurchaseRequest
+from models import Product, PurchaseRequest
 from storage import PRODUCTS_DB
 from utils import validate_product, determine_status, auto_restock
+from response import success_response, error_response
 
 app = FastAPI()
 
@@ -10,44 +10,48 @@ app = FastAPI()
 def add_product(product: Product):
     data = validate_product(product.dict())
     if data["product_id"] in PRODUCTS_DB:
-        raise HTTPException(status_code=400, detail="Product ID already exists.")
+        return error_response("Product ID already exists.", "ProductAlreadyExists", 400)
     PRODUCTS_DB[data["product_id"]] = data
-    return {"message": "Product added successfully", "product": data}
+    return success_response("Product added successfully", data)
 
 @app.get("/inventory/{product_id}")
 def inventory_status(product_id: str):
     product = PRODUCTS_DB.get(product_id)
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found.")
+        return error_response("Product not found.", "ProductNotFound", 404)
     auto_restock(product)
-    return {
+    response_data = {
         "product_id": product["product_id"],
         "stock_quantity": product["stock_quantity"],
         "status": determine_status(product),
         "priority": product["priority"]
     }
+    return success_response("Inventory status retrieved", response_data)
 
 @app.patch("/purchase/{product_id}")
 def purchase_product(product_id: str, request: PurchaseRequest):
-    quantity = request.quantity
     product = PRODUCTS_DB.get(product_id)
+    quantity = request.quantity
+
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found.")
+        return error_response("Product not found.", "ProductNotFound", 404)
 
     if quantity <= 0:
-        raise HTTPException(status_code=400, detail="Purchase quantity must be positive.")
+        return error_response("Quantity must be positive.", "InvalidQuantity", 400)
 
     if product["stock_quantity"] < quantity:
-        raise HTTPException(status_code=400, detail="Not enough stock available.")
+        return error_response("Not enough stock available.", "InsufficientStock", 400)
 
-    product["stock_quantity"] = product["stock_quantity"] - quantity
+    product["stock_quantity"] -= quantity
     auto_restock(product)
 
-    return {
-        "message": f"Purchased {quantity} units of {product['name']}.",
+    result = {
+        "product_id": product["product_id"],
         "new_stock": product["stock_quantity"],
         "status": determine_status(product)
     }
+
+    return success_response(f"Purchased {quantity} units of {product['name']}.", result)
 
 if __name__ == "__main__":
     import uvicorn
